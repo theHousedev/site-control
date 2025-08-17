@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="${HOME}/.scripts/site-control"
+
+# Decoration ----------------------------------------------------------------------------
+R='\033[0;31m'
+G='\033[0;32m'
+Y='\033[0;33m'
+B='\033[0;34m'
+M='\033[0;35m'
+C='\033[0;36m'
+NC='\033[0m'
+
+banner() { printf "${M}============${NC} %s ${M}============${NC} %s\n" "$1" "${2:+\n$2}"; }
+
+ERR() { echo -e "${R}✗${NC} $1" >&2; }
+OK() { echo -e "${G}✓${NC} $1"; }
+TODO() { echo -e "${Y}TODO: ${C}$1${NC}" >&2; }
+DEBUG() { echo -e "${Y}DEBUG:${NC} $1" >&2; }
+
+# Initialization -------------------------------------------------------------------------
+script_init() {
+    if [ -f "$SCRIPT_CFG" ]; then
+        return 0;
+    fi
+    SCRIPT_CFG="${SCRIPT_DIR}/site-control-config.yaml"
+    if [[ ! -f "$SCRIPT_CFG" ]]; then
+        ERR "Config file not found: $SCRIPT_CFG"
+        return 1
+    fi
+    CFG_KEYS=$(yq e '.sites | keys[] | .' "$SCRIPT_CFG")
+}
+
+# Helpers -------------------------------------------------------------------------------
+has_local_config() {
+    if [ -f "${PWD}/cfg.yaml" ]; then
+        return 0;
+    fi
+    return 1;
+}
+
+has_script_config() {
+    TODO: "has_script_config"
+}
+
+# YAML Handling -------------------------------------------------------------------------
+get_and_incr_site_count() {
+    local site_count=$((1 + $(yq e '.global.site_count' "$SCRIPT_CFG")))
+    yq -i ".global.site_count = $site_count" "$SCRIPT_CFG"
+    echo $site_count
+}
+
+write_config() {
+    local site="$1"
+    local local_cfg; local_cfg="${PWD}/cfg.yaml"
+    touch $local_cfg
+    echo -e "NOTE: You can edit the following values later."
+    echo -e "Please enter a short site description:"
+    read -r description
+    echo -e "Please enter the git repo URL:"
+    read -r git_url
+
+    yq -i "with(.sites.${site};
+        .tag = \"${site}\" |
+        .name = \"${site^} Log\" |
+        .description = \"${description}\" |
+        .git_repo = \"${git_url}\"
+    )" "${local_cfg}"
+    OK "Created local config file: $local_cfg"
+}
+
+register_new() {
+    local site="$1"
+    local index; index=$(get_and_incr_site_count)
+    local bbase; bbase=$(yq e '.global.base_bport' "$SCRIPT_CFG")
+    local fbase; fbase=$(yq e '.global.base_fport' "$SCRIPT_CFG")
+    local rootdir=${PWD}
+
+    yq -i "with(.sites.${site};
+        .index = ${index} |
+        .tag = \"${site}\" |
+        .name = \"${site^} Log\" |
+        .status = \"stopped\" |
+        .last_start = null |
+        .fport = $((index + fbase)) |
+        .bport = $((index + bbase)) |
+        .root = \"${rootdir}\" |
+        .fdir = \"${rootdir}/app\" |
+        .bdir = \"${rootdir}/backend\" |
+        .config = \"${rootdir}/cfg.yaml\"
+    )" "${SCRIPT_CFG}"
+    OK "Successfully registered site"
+}
+
+# Core Functions ------------------------------------------------------------------------
+z() { # tester function
+    return
+}
+
+list() {
+    TODO "list"
+}
+
+new() {
+    script_init
+    local site="$1"
+    if has_local_cfg; then
+        ERR "Local config already exists"
+        echo -e "Use '${G}site stats $site${NC}' to view details.\n" >&2;
+        return 1;
+    else
+        if [ "$site" != "${PWD##*/}" ]; then
+            ERR "'$site' is invalid - must match present dir name."
+            read -n 1 -p "  Proceed using pwd name '${PWD##*/}'? (y/n) " proceed
+            echo ""
+            case "$proceed" in
+                y|Y|yes|YES) site="${PWD##*/}" ;;
+                n|N|no|NO) echo -e "Quitting setup."; return 1; ;;
+                *) echo -e "Invalid response, quitting setup."; return 1; ;;
+            esac
+        fi
+
+        echo -e "Configuring '$site'..."
+        if ! write_config "$site"; then
+            ERR "Failed to create local config; aborting..."
+            exit 1
+        fi
+
+        if ! register_new "$site"; then
+            ERR "Failed to register site, aborting..."
+            exit 1
+        fi
+    fi
+}
+
+dev() {
+    script_init
+    local site="$1"
+    if [[ has_local_config && has_script_config ]]; then
+        OK "Found local config: ${PWD}/"
+        root=$(resolve_site_root "$site") || exit 1;
+    else
+        ERR "'$site' config not found"
+        return 1;
+    fi
+
+    local root; root=$(resolve_site_root "$site") || exit 1;
+
+    # check if dir (& subdirs) exist
+
+    # check for .env file
+    
+    # check for existing tmux dev session
+
+    # check for existing prod session; stop gracefully if found
+    
+    # start site in dev mode
+    echo "  Starting local dev server..."
+
+    # print success: details, localhost url, etc.
+
+    # print "tmux a SITE:${SITE_TRUNK[$1]}" as final line
+}
+
+deploy() {
+    TODO "deploy"
+}
+
+push() {
+    script_init
+    TODO "push"
+}
+
+stats() {
+    script_init
+    TODO "stats"
+}
+
+logs() {
+    script_init
+    TODO "logs"
+}
+
+help() {
+    if [ "$1" == "short" ]; then
+        echo -e "\nUsage: ${G}site <command> <site>${NC}"
+        echo -e "Show all commands: '${G}site -h${NC}'\n"
+        return 0;
+    fi
+    banner "Site Control Help"
+    echo -e "Usage: ${G}site <command> <site>${NC}"
+    echo -e "\nCommands:"
+    echo -e "  ${G}help${NC}            Show this help message"
+    echo -e "  ${G}list${NC}            List all sites"
+    echo -e "  ${G}new <site>${NC}      Initialize a new site"
+    echo -e "  ${G}dev <site>${NC}      Start a site in dev mode"
+    echo -e "  ${G}deploy <site>${NC}   Deploy a live site"
+    echo -e "  ${G}push <site>${NC}     Push a site to prod"
+    echo -e "  ${G}stats <site>${NC}    Show stats for one (or all) sites"
+    echo -e "  ${G}logs <site>${NC}     Show logs for one (or all) sites"
+}
+
+# main -----------------------------------------------------------------------------
+main() {
+    case "${1}" in
+        new) new "$2";; list) list ;; -h|--help|help) help ;;
+        dev) dev "$2" ;; deploy) deploy "$2" ;; push) push "$2";;
+        stats) stats "$2" ;; logs) logs ;; z) z "$2";; *) help "short" ;;
+    esac
+}
+
+main "$@"
