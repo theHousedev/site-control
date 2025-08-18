@@ -16,22 +16,23 @@ banner() { printf "${M}============ ${B}%s ${M}============${NC} %s\n" "$1" "${2
 ERR() { echo -e "${R}✗${NC} $1" >&2; }
 OK() { echo -e "${G}✓${NC} $1"; }
 WARN() { echo -e "${Y}WARNING: $1${NC}" >&2; }
-TODO() { echo -e "${Y}TODO: ${C}$1${NC}" >&2; }
-DEBUG() { echo -e "${Y}DEBUG:${NC} $1" >&2; }
+TODO() { echo -e "${Y}TODO: $1${NC}" >&2; }
+DEBUG() { echo -e "${C}DEBUG: ${B}$1${NC}" >&2; }
 
 # Initialization -------------------------------------------------------------------------
 script_init() {
-    if [ -f "$MAIN_CFG" ]; then
+    if [ -f "$REGISTRY" ]; then
         return 0;
     fi
-    MAIN_CFG="${SCRIPT_DIR}/site-control-config.yaml"
-    if [[ ! -f "$MAIN_CFG" ]]; then
-        ERR "Config file not found: $MAIN_CFG"
-        echo "Script will exit, rebuild global config and re-run."
-        return 1
+    REGISTRY="${SCRIPT_DIR}/registry.yaml"
+    if [[ ! -f "$REGISTRY" ]]; then
+        ERR "Registry file missing from '${G}$REGISTRY${NC}'"
+        echo "Unable to obtain global values."
+        echo "Script will now exit..."
+        exit 1
     fi
-    if ! CFG_KEYS=$(yq e '.sites | keys[] | .' "$MAIN_CFG" 2>/dev/null); then
-        WARN "No existing sites found on init."
+    if ! CFG_KEYS=$(yq e '.sites | keys[] | .' "$REGISTRY" 2>/dev/null); then
+        WARN "No registered sites found."
     fi
 }
 script_init
@@ -45,10 +46,14 @@ has_local_config() {
 }
 
 has_script_config() {
-    if [ -f "${MAIN_CFG}" ]; then
+    if [ -f "${REGISTRY}" ]; then
         return 0;
     fi
     return 1;
+}
+
+get_all_site_names() {
+    echo $CFG_KEYS
 }
 
 get_version_info() {
@@ -70,7 +75,7 @@ get_version_info() {
 
 update_version_info() {
     local site="$1"   
-    local path; if ! path=$(yq e ".sites.${site}.root" "$MAIN_CFG"); then
+    local path; if ! path=$(yq e ".sites.${site}.root" "$REGISTRY"); then
         ERR "Updating version info failed: site root path not found"
     fi
 
@@ -84,13 +89,13 @@ update_version_info() {
         .prod_version = \"${vprod}\" |
         .commit_diff = ${commits} |
         .dev_branch = \"${branch}\"
-    )" "${MAIN_CFG}"
+    )" "${REGISTRY}"
 }
 
 # YAML ----------------------------------------------------------------------------------
 get_and_incr_site_count() {
-    local site_count=$((1 + $(yq e '.global.site_count' "$MAIN_CFG")))
-    yq -i ".global.site_count = $site_count" "$MAIN_CFG"
+    local site_count=$((1 + $(yq e '.global.site_count' "$REGISTRY")))
+    yq -i ".global.site_count = $site_count" "$REGISTRY"
     echo $site_count
 }
 
@@ -114,8 +119,8 @@ make_local_config() {
 register() {
     local site="$1"
     local index; index=$(get_and_incr_site_count)
-    local bbase; bbase=$(yq e '.global.base_bport' "$MAIN_CFG")
-    local fbase; fbase=$(yq e '.global.base_fport' "$MAIN_CFG")
+    local bbase; bbase=$(yq e '.global.base_bport' "$REGISTRY")
+    local fbase; fbase=$(yq e '.global.base_fport' "$REGISTRY")
     local rootdir; rootdir=${PWD}
 
     yq -i "with(.sites.${site};
@@ -130,10 +135,20 @@ register() {
         .bdir = \"${rootdir}/backend\" |
         .config = \"${rootdir}/cfg.yaml\" |
         .last_start = null |
-        .last_deploy = null
-    )" "${MAIN_CFG}"
+        .last_deploy = null |
+        .session_name = \"DEV:${site}\"
+    )" "${REGISTRY}"
 
     update_version_info "$site"
+}
+
+sanity_check() {
+    local site="$1"
+    # pass $site into a sanity check function which will
+        # look up $site in script registry
+        # fetch root, fdir, bdir from registry
+        # validate at least these dirs exist; else errmsg
+        # check for .env in root
 }
 
 # Core Functions ------------------------------------------------------------------------
@@ -180,21 +195,20 @@ new() {
 
 dev() {
     local site="$1"
-    
-    # check if dir (& subdirs) exist
-
-    # check for .env file
-    
-    # check for existing tmux dev session
-
-    # check for existing prod session; stop gracefully if found
-    
-    # start site in dev mode
-    echo "  Starting local dev server..."
-
-    # print success: details, localhost url, etc.
-
-    # print "tmux a SITE:${SITE_TRUNK[$1]}" as final line
+    local cmd; cmd="${2:-run}" # "run" or "stop"
+    if ! sanity_check $site; then exit 1; fi
+    local session; session=$(yq e ".sites.${site}.session_name" $REGISTRY)
+    if [[ "$cmd" == "stop" ]]; then echo -e "Stopping session '${G}$session${NC}'..."; fi
+    # check for existing tmux dev session for this site (.sites.${site}.session_name)
+    if tmux has-session -t $session 2>/dev/null; then
+        echo "Found existing tmux session named '$session'"
+    else
+        echo "No session named '$session' found, creating..."
+        tmux new-session -d -s "$session"
+    fi
+        # if it exists, alert & note differences (maybe short ${site} stats?) then exit 1
+        # if not, start dev session and autostart site processes
+    # print success: details, localhost url, how to attach to tmux session, etc.
 }
 
 deploy() {
@@ -206,6 +220,8 @@ push() {
 }
 
 stats() {
+    echo -e "Ordered names:\n  $(get_all_site_names)"
+    echo "One-per-line:"
     for site in "$CFG_KEYS"; do
         echo "$site"
     done
@@ -238,7 +254,7 @@ help() {
 main() {
     case "${1}" in
         new) new "$2";; list) list ;; -h|--help|help) help ;;
-        dev) dev "$2" ;; deploy) deploy "$2" ;; push) push "$2";;
+        dev) dev "$2" ;; stop) dev "$2" "stop" ;; deploy) deploy "$2" ;; push) push "$2";;
         stats) stats "$2" ;; logs) logs ;; z) z "$2";; *) help "short" ;;
     esac
 }
