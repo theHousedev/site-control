@@ -10,9 +10,20 @@ It's also been a `bash` learning journey for me, and I am adding complexity for 
 - [ ] Can deploy the tunneled website and test in production
 - [ ] Can retrieve site statistics like resource usage, uptime, versioning, etc.
 
-## Idea Dump
+## Planned Ideas
 
-My desired stat blocks would look something like:
+### Commands
+```bash
+site new <name>           # auto-register new site in configs
+site dev <name>           # start dev environment (tmux session)
+site stop <name>          # stop dev environment
+site up <name>            # build and deploy prod
+site down <name>          # stop prod
+site status [<name>]      # show status (all sites or specific)
+site logs <name>          # show logs (all sites or specific, journalctl and/or tmux capture)
+```
+
+### Command output: `stats`
 ```
 pay.example-domain.com
  ├─ Production: UP
@@ -40,3 +51,16 @@ fuel.example-domain.com
     ├─ Port 5052
     └─ Last commit: 7h ago
 ```
+
+### Expected Directory Structure
+```
+~/sites/
+ ├─ _prod_/
+ |  ├─ fuel/
+ |  ├─ pay/
+ |  └─ trips/
+ ├─ fuel/
+ ├─ pay/
+ └─ trips/
+```
+

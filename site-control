@@ -11,25 +11,30 @@ M='\033[0;35m'
 C='\033[0;36m'
 NC='\033[0m'
 
-banner() { printf "${M}============${NC} %s ${M}============${NC} %s\n" "$1" "${2:+\n$2}"; }
+banner() { printf "${M}============ ${B}%s ${M}============${NC} %s\n" "$1" "${2:+\n$2}"; }
 
 ERR() { echo -e "${R}✗${NC} $1" >&2; }
 OK() { echo -e "${G}✓${NC} $1"; }
+WARN() { echo -e "${Y}WARNING: $1${NC}" >&2; }
 TODO() { echo -e "${Y}TODO: ${C}$1${NC}" >&2; }
 DEBUG() { echo -e "${Y}DEBUG:${NC} $1" >&2; }
 
 # Initialization -------------------------------------------------------------------------
 script_init() {
-    if [ -f "$SCRIPT_CFG" ]; then
+    if [ -f "$MAIN_CFG" ]; then
         return 0;
     fi
-    SCRIPT_CFG="${SCRIPT_DIR}/site-control-config.yaml"
-    if [[ ! -f "$SCRIPT_CFG" ]]; then
-        ERR "Config file not found: $SCRIPT_CFG"
+    MAIN_CFG="${SCRIPT_DIR}/site-control-config.yaml"
+    if [[ ! -f "$MAIN_CFG" ]]; then
+        ERR "Config file not found: $MAIN_CFG"
+        echo "Script will exit, rebuild global config and re-run."
         return 1
     fi
-    CFG_KEYS=$(yq e '.sites | keys[] | .' "$SCRIPT_CFG")
+    if ! CFG_KEYS=$(yq e '.sites | keys[] | .' "$MAIN_CFG" 2>/dev/null); then
+        WARN "No existing sites found on init."
+    fi
 }
+script_init
 
 # Helpers -------------------------------------------------------------------------------
 has_local_config() {
@@ -40,61 +45,100 @@ has_local_config() {
 }
 
 has_script_config() {
-    TODO: "has_script_config"
+    if [ -f "${MAIN_CFG}" ]; then
+        return 0;
+    fi
+    return 1;
 }
 
-# YAML Handling -------------------------------------------------------------------------
+get_version_info() {
+    local path="$1"
+    local current_branch; current_branch=$(
+        git -C "$path" branch --show-current 2>/dev/null || echo "unknown"
+    )
+    local prod_version; prod_version=$(
+        git -C "$path" describe --abbrev=0 2>/dev/null || echo "unknown"
+    )
+    local dev_version; dev_version=$(
+        git -C "$path" tag --sort=-version:refname | head -1 2>/dev/null || echo "unknown"
+    )
+    local commits; commits=$(
+        git -C "$path" rev-list --count main..HEAD 2>/dev/null || echo "0"
+    )
+    echo "$prod_version|$dev_version|$commits|$current_branch"
+}
+
+update_version_info() {
+    local site="$1"   
+    local path; if ! path=$(yq e ".sites.${site}.root" "$MAIN_CFG"); then
+        ERR "Updating version info failed: site root path not found"
+    fi
+
+    local vinfo; vinfo=$(get_version_info "$path")
+    local vprod; vprod=$(echo "$vinfo" | cut -d'|' -f1)
+    local vdev; vdev=$(echo "$vinfo" | cut -d'|' -f2)
+    local commits; commits=$(echo "$vinfo" | cut -d'|' -f3)
+    local branch; branch=$(echo "$vinfo" | cut -d'|' -f4)
+    yq -i "with(.sites.${site};
+        .dev_version = \"${vdev}\" |
+        .prod_version = \"${vprod}\" |
+        .commit_diff = ${commits} |
+        .dev_branch = \"${branch}\"
+    )" "${MAIN_CFG}"
+}
+
+# YAML ----------------------------------------------------------------------------------
 get_and_incr_site_count() {
-    local site_count=$((1 + $(yq e '.global.site_count' "$SCRIPT_CFG")))
-    yq -i ".global.site_count = $site_count" "$SCRIPT_CFG"
+    local site_count=$((1 + $(yq e '.global.site_count' "$MAIN_CFG")))
+    yq -i ".global.site_count = $site_count" "$MAIN_CFG"
     echo $site_count
 }
 
-write_config() {
+make_local_config() {
     local site="$1"
     local local_cfg; local_cfg="${PWD}/cfg.yaml"
-    touch $local_cfg
-    echo -e "NOTE: You can edit the following values later."
-    echo -e "Please enter a short site description:"
-    read -r description
-    echo -e "Please enter the git repo URL:"
-    read -r git_url
-
-    yq -i "with(.sites.${site};
+    touch "$local_cfg"
+    read -r -p "Enter site description: " \
+        -i "Webapp to log and view fuel economy data" -e desc
+    read -r -p "Enter repo URL: " \
+        -i "http://github.com/theHousedev/fuel-log" -e git_url
+    yq -i "with(.site;
         .tag = \"${site}\" |
         .name = \"${site^} Log\" |
-        .description = \"${description}\" |
+        .description = \"${desc}\" |
         .git_repo = \"${git_url}\"
     )" "${local_cfg}"
     OK "Created local config file: $local_cfg"
 }
 
-register_new() {
+register() {
     local site="$1"
     local index; index=$(get_and_incr_site_count)
-    local bbase; bbase=$(yq e '.global.base_bport' "$SCRIPT_CFG")
-    local fbase; fbase=$(yq e '.global.base_fport' "$SCRIPT_CFG")
-    local rootdir=${PWD}
+    local bbase; bbase=$(yq e '.global.base_bport' "$MAIN_CFG")
+    local fbase; fbase=$(yq e '.global.base_fport' "$MAIN_CFG")
+    local rootdir; rootdir=${PWD}
 
     yq -i "with(.sites.${site};
         .index = ${index} |
         .tag = \"${site}\" |
         .name = \"${site^} Log\" |
         .status = \"stopped\" |
-        .last_start = null |
         .fport = $((index + fbase)) |
         .bport = $((index + bbase)) |
         .root = \"${rootdir}\" |
         .fdir = \"${rootdir}/app\" |
         .bdir = \"${rootdir}/backend\" |
-        .config = \"${rootdir}/cfg.yaml\"
-    )" "${SCRIPT_CFG}"
-    OK "Successfully registered site"
+        .config = \"${rootdir}/cfg.yaml\" |
+        .last_start = null |
+        .last_deploy = null
+    )" "${MAIN_CFG}"
+
+    update_version_info "$site"
 }
 
 # Core Functions ------------------------------------------------------------------------
-z() { # tester function
-    return
+z() { # tester function == != >= <= // ~
+    update_version_info "$1"
 }
 
 list() {
@@ -102,16 +146,15 @@ list() {
 }
 
 new() {
-    script_init
     local site="$1"
-    if has_local_cfg; then
+    if has_local_config; then
         ERR "Local config already exists"
         echo -e "Use '${G}site stats $site${NC}' to view details.\n" >&2;
         return 1;
     else
         if [ "$site" != "${PWD##*/}" ]; then
             ERR "'$site' is invalid - must match present dir name."
-            read -n 1 -p "  Proceed using pwd name '${PWD##*/}'? (y/n) " proceed
+            read -nr 1 -p "  Proceed using pwd name '${PWD##*/}'? (y/n) " proceed
             echo ""
             case "$proceed" in
                 y|Y|yes|YES) site="${PWD##*/}" ;;
@@ -121,31 +164,23 @@ new() {
         fi
 
         echo -e "Configuring '$site'..."
-        if ! write_config "$site"; then
+        if ! make_local_config "$site"; then
             ERR "Failed to create local config; aborting..."
             exit 1
         fi
 
-        if ! register_new "$site"; then
+        if ! register "$site"; then
             ERR "Failed to register site, aborting..."
             exit 1
+        else
+            OK "Successfully registered site"
         fi
     fi
 }
 
 dev() {
-    script_init
     local site="$1"
-    if [[ has_local_config && has_script_config ]]; then
-        OK "Found local config: ${PWD}/"
-        root=$(resolve_site_root "$site") || exit 1;
-    else
-        ERR "'$site' config not found"
-        return 1;
-    fi
-
-    local root; root=$(resolve_site_root "$site") || exit 1;
-
+    
     # check if dir (& subdirs) exist
 
     # check for .env file
@@ -167,17 +202,16 @@ deploy() {
 }
 
 push() {
-    script_init
     TODO "push"
 }
 
 stats() {
-    script_init
-    TODO "stats"
+    for site in "$CFG_KEYS"; do
+        echo "$site"
+    done
 }
 
 logs() {
-    script_init
     TODO "logs"
 }
 
