@@ -53,7 +53,7 @@ has_script_config() {
 }
 
 get_all_site_names() {
-    echo $CFG_KEYS
+    echo "$CFG_KEYS"
 }
 
 get_version_info() {
@@ -119,8 +119,10 @@ make_local_config() {
 register() {
     local site="$1"
     local index; index=$(get_and_incr_site_count)
-    local bbase; bbase=$(yq e '.global.base_bport' "$REGISTRY")
-    local fbase; fbase=$(yq e '.global.base_fport' "$REGISTRY")
+    local bbase; bbase=$(yq e '.global.ports.backend' "$REGISTRY")
+    local bport; bport=$((index + bbase))
+    local fbase; fbase=$(yq e '.global.ports.frontend' "$REGISTRY")
+    local fport; fport=$((index + fbase))
     local rootdir; rootdir=${PWD}
 
     yq -i "with(.sites.${site};
@@ -128,15 +130,15 @@ register() {
         .tag = \"${site}\" |
         .name = \"${site^} Log\" |
         .status = \"stopped\" |
-        .fport = $((index + fbase)) |
-        .bport = $((index + bbase)) |
+        .fport = ${fport} |
+        .bport = ${bport} |
         .root = \"${rootdir}\" |
-        .fdir = \"${rootdir}/app\" |
-        .bdir = \"${rootdir}/backend\" |
+        .fpath = \"${rootdir}/app\" |
+        .bpath = \"${rootdir}/backend\" |
         .config = \"${rootdir}/cfg.yaml\" |
         .last_start = null |
         .last_deploy = null |
-        .session_name = \"DEV:${site}\"
+        .session_name = \"dev-${site}\"
     )" "${REGISTRY}"
 
     update_version_info "$site"
@@ -195,19 +197,40 @@ new() {
 
 dev() {
     local site="$1"
+    if ! sanity_check "$site"; then exit 1; fi
     local cmd; cmd="${2:-run}" # "run" or "stop"
-    if ! sanity_check $site; then exit 1; fi
-    local session; session=$(yq e ".sites.${site}.session_name" $REGISTRY)
-    if [[ "$cmd" == "stop" ]]; then echo -e "Stopping session '${G}$session${NC}'..."; fi
-    # check for existing tmux dev session for this site (.sites.${site}.session_name)
-    if tmux has-session -t $session 2>/dev/null; then
-        echo "Found existing tmux session named '$session'"
+    local bpath; bpath=$(yq e ".sites.${site}.bpath" "$REGISTRY")
+    local bport; bport=$(yq e ".sites.${site}.bport" "$REGISTRY")
+    local fpath; fpath=$(yq e ".sites.${site}.fpath" "$REGISTRY")
+    local fport; fport=$(yq e ".sites.${site}.fport" "$REGISTRY")
+    local session; session=$(yq e ".sites.${site}.session_name" "$REGISTRY")
+
+    if [[ "$cmd" == "stop" ]]; then echo -e "Stopping '${G}$session${NC}'..."; fi
+
+    if tmux has-session -t "$session" 2>/dev/null; then
+        echo -e "Found existing tmux session: '${G}$session${NC}'"
     else
-        echo "No session named '$session' found, creating..."
-        tmux new-session -d -s "$session"
+        if ! tmux new-session -d -s "$session" \
+            -e "SITE_BACKEND_PORT=$bport" \
+            -e "SITE_FRONTEND_PORT=$fport" \
+            -e "ALLOWED_ORIGIN=http://localhost:$fport" 2>/dev/null; then
+            ERR "Failed to start tmux session."
+            exit 1
+        fi
+        tmux split-window -h -t "${session}"
+        OK "Started new tmux session: '${G}$session${NC}'"
     fi
-        # if it exists, alert & note differences (maybe short ${site} stats?) then exit 1
-        # if not, start dev session and autostart site processes
+
+    if ! tmux send-keys -t "${session}:0.0" "cd ${bpath} && go run ." Enter; then
+        ERR "Failed to start '${G}${session}${NC}' backend process."
+        exit 1; fi
+    OK "Backend service started"
+
+    if ! tmux send-keys -t "${session}:0.1" "cd ${fpath} && npm run dev" Enter; then
+        ERR "Failed to start '${G}${session}${NC}' backend process."
+        exit 1; fi
+    OK "Frontend service started"
+
     # print success: details, localhost url, how to attach to tmux session, etc.
 }
 
@@ -222,7 +245,7 @@ push() {
 stats() {
     echo -e "Ordered names:\n  $(get_all_site_names)"
     echo "One-per-line:"
-    for site in "$CFG_KEYS"; do
+    for site in $CFG_KEYS; do
         echo "$site"
     done
 }

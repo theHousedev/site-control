@@ -2,8 +2,9 @@ global:
   site_count: 1
   systemd_user: kh
   root_domain: khouse.dev
-  base_bport: 5000
-  base_fport: 6000
+  ports:
+    backend: 5000
+    frontend: 6000
 sites:
   fuel:
     index: 1
@@ -13,16 +14,13 @@ sites:
     fport: 6001
     bport: 5001
     root: /home/kh/sites/fuel
-    fdir: /home/kh/sites/fuel/app
-    bdir: /home/kh/sites/fuel/backend
+    fpath: /home/kh/sites/fuel/app
+    bpath: /home/kh/sites/fuel/backend
     config: /home/kh/sites/fuel/cfg.yaml
     last_start: null
     last_deploy: null
-    session_name: DEV:fuel
+    session_name: dev-fuel
     dev_version: v0.1.2
     prod_version: v0.1.0
     commit_diff: 2
     dev_branch: fix/page-ui
-  pay:
-  trips:
-  mx:
