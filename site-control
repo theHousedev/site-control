@@ -92,6 +92,13 @@ update_version_info() {
     )" "${REGISTRY}"
 }
 
+update_timestamp() {
+    local site; site="$1"
+    local mode; mode="${2}"
+    local timestamp; timestamp=$(date +'%d%b%Y %H:%M:%S')
+    yq -i ".sites.${site}.last_${mode} = \"${timestamp}\"" "$REGISTRY"
+}
+
 # YAML ----------------------------------------------------------------------------------
 get_and_incr_site_count() {
     local site_count=$((1 + $(yq e '.global.site_count' "$REGISTRY")))
@@ -136,8 +143,8 @@ register() {
         .fpath = \"${rootdir}/app\" |
         .bpath = \"${rootdir}/backend\" |
         .config = \"${rootdir}/cfg.yaml\" |
-        .last_start = null |
-        .last_deploy = null |
+        .last_up = null |
+        .last_dev = null |
         .session_name = \"dev-${site}\"
     )" "${REGISTRY}"
 
@@ -155,7 +162,9 @@ sanity_check() {
 
 # Core Functions ------------------------------------------------------------------------
 z() { # tester function == != >= <= // ~
-    update_version_info "$1"
+    local site; site="$1"
+    update_version_info "$site"
+    update_timestamp "$site" "up"
 }
 
 list() {
@@ -205,33 +214,49 @@ dev() {
     local fport; fport=$(yq e ".sites.${site}.fport" "$REGISTRY")
     local session; session=$(yq e ".sites.${site}.session_name" "$REGISTRY")
 
-    if [[ "$cmd" == "stop" ]]; then echo -e "Stopping '${G}$session${NC}'..."; fi
+    if [[ "$cmd" == "stop" ]]; then
+        echo -e "Stopping '${G}$session${NC}'...";
 
-    if tmux has-session -t "$session" 2>/dev/null; then
-        echo -e "Found existing tmux session: '${G}$session${NC}'"
-    else
-        if ! tmux new-session -d -s "$session" \
-            -e "SITE_BACKEND_PORT=$bport" \
-            -e "SITE_FRONTEND_PORT=$fport" \
-            -e "ALLOWED_ORIGIN=http://localhost:$fport" 2>/dev/null; then
-            ERR "Failed to start tmux session."
-            exit 1
+        if tmux has-session -t "$session" 2>/dev/null; then
+            if tmux kill-session -t "$session" 2>/dev/null; then
+                OK "Stopped session: '${G}$session${NC}'"
+            else
+                ERR "Unable to kill session: '${G}$session${NC}'"
+                exit 1
+            fi
+        else
+            WARN "No session found: '${G}$session${NC}'"
         fi
-        tmux split-window -h -t "${session}"
-        OK "Started new tmux session: '${G}$session${NC}'"
+    else
+        if tmux has-session -t "$session" 2>/dev/null; then
+            echo -e "Found existing tmux session: '${G}$session${NC}'"
+        else
+            if ! tmux new-session -d -s "$session" \
+                -e "SITE_BACKEND_PORT=$bport" \
+                -e "SITE_FRONTEND_PORT=$fport" \
+                -e "ALLOWED_ORIGIN=http://localhost:$fport" 2>/dev/null; then
+                ERR "Failed to start tmux session."
+                exit 1
+            fi
+            tmux split-window -h -t "${session}"
+            OK "Started new tmux session: '${G}$session${NC}'"
+        fi
+
+        if ! tmux send-keys -t "${session}:0.0" "cd ${bpath} && go run ." Enter; then
+            ERR "Failed to start '${G}${session}${NC}' backend process."
+            exit 1; fi
+        OK "Backend service started"
+
+        if ! tmux send-keys -t "${session}:0.1" "cd ${fpath} && npm run dev" Enter; then
+            ERR "Failed to start '${G}${session}${NC}' backend process."
+            exit 1; fi
+        OK "Frontend service started"
+
+        # update last_dev
+        update_timestamp "$site" "dev"
+        
+        # TODO: details, localhost url, how to attach to tmux session, etc.
     fi
-
-    if ! tmux send-keys -t "${session}:0.0" "cd ${bpath} && go run ." Enter; then
-        ERR "Failed to start '${G}${session}${NC}' backend process."
-        exit 1; fi
-    OK "Backend service started"
-
-    if ! tmux send-keys -t "${session}:0.1" "cd ${fpath} && npm run dev" Enter; then
-        ERR "Failed to start '${G}${session}${NC}' backend process."
-        exit 1; fi
-    OK "Frontend service started"
-
-    # print success: details, localhost url, how to attach to tmux session, etc.
 }
 
 deploy() {
