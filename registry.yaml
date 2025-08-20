@@ -17,10 +17,10 @@ sites:
     fpath: /home/kh/sites/fuel/app
     bpath: /home/kh/sites/fuel/backend
     config: /home/kh/sites/fuel/cfg.yaml
-    last_up: 19Aug2025 22:49:12
-    last_dev: 19Aug2025 22:48:32
+    last_up: 20Aug2025 13:30:38
+    last_dev: 20Aug2025 12:14:30
     session_name: dev-fuel
-    dev_version: v0.1.2
-    prod_version: v0.1.0
-    commit_diff: 2
-    dev_branch: feat/global-stats
+    dev_version: v0.2.0
+    prod_version: v0.2.0
+    commit_diff: 0
+    dev_branch: main
