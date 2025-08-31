@@ -58,18 +58,24 @@ get_all_site_names() {
 
 get_version_info() {
     local path="$1"
-    local current_branch; current_branch=$(
-        git -C "$path" branch --show-current 2>/dev/null || echo "unknown"
-    )
+
     local prod_version; prod_version=$(
         git -C "$path" describe --abbrev=0 2>/dev/null || echo "unknown"
     )
     local dev_version; dev_version=$(
         git -C "$path" tag --sort=-version:refname | head -1 2>/dev/null || echo "unknown"
     )
+    if [[ "$prod_version" == "unknown" && "$dev_version" != "unknown" ]]; then
+        prod_version="$dev_version"
+    fi
+
     local commits; commits=$(
         git -C "$path" rev-list --count main..HEAD 2>/dev/null || echo "0"
     )
+    local current_branch; current_branch=$(
+        git -C "$path" branch --show-current 2>/dev/null || echo "unknown"
+    )
+
     echo "$prod_version|$dev_version|$commits|$current_branch"
 }
 
@@ -84,6 +90,7 @@ update_version_info() {
     local vdev; vdev=$(echo "$vinfo" | cut -d'|' -f2)
     local commits; commits=$(echo "$vinfo" | cut -d'|' -f3)
     local branch; branch=$(echo "$vinfo" | cut -d'|' -f4)
+    
     yq -i "with(.sites.${site};
         .dev_version = \"${vdev}\" |
         .prod_version = \"${vprod}\" |
@@ -261,6 +268,7 @@ dev() {
 
 deploy() {
     TODO "deploy"
+    get_version_info "$PWD"
 }
 
 push() {

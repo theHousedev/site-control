@@ -1,5 +1,5 @@
 global:
-  site_count: 1
+  site_count: 2
   systemd_user: kh
   root_domain: khouse.dev
   ports:
@@ -18,9 +18,27 @@ sites:
     bpath: /home/kh/sites/fuel/backend
     config: /home/kh/sites/fuel/cfg.yaml
     last_up: 20Aug2025 13:30:38
-    last_dev: 20Aug2025 12:14:30
+    last_dev: 30Aug2025 18:31:11
     session_name: dev-fuel
     dev_version: v0.2.0
     prod_version: v0.2.0
+    commit_diff: 0
+    dev_branch: main
+  pay:
+    index: 2
+    tag: pay
+    name: Pay Log
+    status: stopped
+    fport: 6002
+    bport: 5002
+    root: /home/kh/sites/pay
+    fpath: /home/kh/sites/pay/app
+    bpath: /home/kh/sites/pay/backend
+    config: /home/kh/sites/pay/cfg.yaml
+    last_up: null
+    last_dev: 30Aug2025 19:01:09
+    session_name: dev-pay
+    dev_version: v0.0.1
+    prod_version: v0.0.1
     commit_diff: 0
     dev_branch: main
