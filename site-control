@@ -172,7 +172,7 @@ sanity_check() {
 }
 
 # Core Functions ------------------------------------------------------------------------
-z() { # tester function == != >= <= // ~
+z() { # catch-all tester function
     local site; site="$1"
     update_version_info "$site"
     update_timestamp "$site" "up"
