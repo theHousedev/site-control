@@ -120,13 +120,13 @@ make_local_config() {
     local bport; bport=$(yq e ".sites.${site}.bport" "$REGISTRY")
     local fport; fport=$(yq e ".sites.${site}.fport" "$REGISTRY")
     read -r -p "Enter site description: " \
-        -i "Webapp to..." -e desc
+        -i "Webapp to..." -e description
     read -r -p "Enter repo URL: " \
         -i "http://github.com/theHousedev/" -e git_url
-    yq -i "with(.site;
+    yq -i "with(.;
         .tag = \"${site}\" |
         .name = \"${site^} Log\" |
-        .description = \"${desc}\" |
+        .description = \"${description}\" |
         .git_repo = \"${git_url}\" |
         .backend_port = \"${bport}\" |
         .frontend_port = \"${fport}\"
@@ -258,7 +258,7 @@ dev() {
         OK "Backend service started"
 
         if ! tmux send-keys -t "${session}:0.1" "cd ${fpath} && npm run dev" Enter; then
-            ERR "Failed to start '${G}${session}${NC}' backend process."
+            ERR "Failed to start '${G}${session}${NC}' frontend process."
             exit 1; fi
         OK "Frontend service started"
 

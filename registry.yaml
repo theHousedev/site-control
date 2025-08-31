@@ -36,7 +36,7 @@ sites:
     bpath: /home/kh/sites/pay/backend
     config: /home/kh/sites/pay/cfg.yaml
     last_up: null
-    last_dev: 31Aug2025 07:17:25
+    last_dev: 31Aug2025 16:11:00
     session_name: dev-pay
     dev_version: v0.0.1
     prod_version: v0.0.1
