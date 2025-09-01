@@ -244,7 +244,7 @@ dev() {
             echo -e "Found existing tmux session: '${G}$session${NC}'"
         else
             if ! tmux new-session -d -s "$session" \
-                -e "ALLOWED_ORIGIN=http://localhost:$fport" 2>/dev/null; then
+                -e "ALLOWED_ORIGIN=http://10.0.0.8:$fport" 2>/dev/null; then
                 ERR "Failed to start tmux session."
                 exit 1
             fi
