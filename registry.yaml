@@ -43,7 +43,7 @@ sites:
       backend: /home/kh/sites/pay/backend
       config: /home/kh/sites/pay/cfg.yaml
     last_up: null
-    last_dev: 14Sep2025 10:56:34
+    last_dev: 21Sep2025 12:15:47
     session_name: dev-pay
     dev_version: v0.0.1
     prod_version: v0.0.1
