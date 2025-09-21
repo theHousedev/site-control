@@ -81,7 +81,7 @@ get_version_info() {
 
 update_version_info() {
     local site="$1"   
-    local path; if ! path=$(yq e ".sites.${site}.root" "$REGISTRY"); then
+    local path; if ! path=$(yq e ".sites.${site}.paths.root" "$REGISTRY"); then
         ERR "Updating version info failed: site root path not found"
     fi
 
@@ -117,8 +117,9 @@ make_local_config() {
     local site="$1"
     local local_cfg; local_cfg="${PWD}/cfg.yaml"
     touch "$local_cfg"
-    local bport; bport=$(yq e ".sites.${site}.bport" "$REGISTRY")
-    local fport; fport=$(yq e ".sites.${site}.fport" "$REGISTRY")
+    local bport; bport=$(yq e ".sites.${site}.ports.backend" "$REGISTRY")
+    local fport; fport=$(yq e ".sites.${site}.ports.frontend" "$REGISTRY")
+    local pport; pport=$(yq e ".sites.${site}.ports.production" "$REGISTRY")
     read -r -p "Enter site description: " \
         -i "Webapp to..." -e description
     read -r -p "Enter repo URL: " \
@@ -128,8 +129,9 @@ make_local_config() {
         .name = \"${site^} Log\" |
         .description = \"${description}\" |
         .git_repo = \"${git_url}\" |
-        .backend_port = \"${bport}\" |
-        .frontend_port = \"${fport}\"
+        .ports.backend = \"${bport}\" |
+        .ports.frontend = \"${fport}\" |
+        .ports.production = \"${pport}\"
     )" "${local_cfg}"
     OK "Created local config file: $local_cfg"
 }
@@ -137,10 +139,12 @@ make_local_config() {
 register() {
     local site="$1"
     local index; index=$(get_and_incr_site_count)
-    local bbase; bbase=$(yq e '.global.ports.backend' "$REGISTRY")
-    local bport; bport=$((index + bbase))
-    local fbase; fbase=$(yq e '.global.ports.frontend' "$REGISTRY")
-    local fport; fport=$((index + fbase))
+    local backend_base; backend_base=$(yq e '.global.ports.backend' "$REGISTRY")
+    local backend_port; backend_port=$((index + backend_base))
+    local production_base; production_base=$(yq e '.global.ports.production' "$REGISTRY")
+    local production_port; production_port=$((index + production_base))
+    local frontend_base; frontend_base=$(yq e '.global.ports.frontend' "$REGISTRY")
+    local frontend_port; frontend_port=$((index + frontend_base))
     local rootdir; rootdir=${PWD}
 
     yq -i "with(.sites.${site};
@@ -148,12 +152,13 @@ register() {
         .tag = \"${site}\" |
         .name = \"${site^} Log\" |
         .status = \"stopped\" |
-        .fport = ${fport} |
-        .bport = ${bport} |
-        .root = \"${rootdir}\" |
-        .fpath = \"${rootdir}/app\" |
-        .bpath = \"${rootdir}/backend\" |
-        .config = \"${rootdir}/cfg.yaml\" |
+        .ports.backend = ${backend_port} |
+        .ports.frontend = ${frontend_port} |
+        .ports.production = ${production_port} |
+        .paths.root = \"${rootdir}\" |
+        .paths.frontend = \"${rootdir}/app\" |
+        .paths.backend = \"${rootdir}/backend\" |
+        .paths.config = \"${rootdir}/cfg.yaml\" |
         .last_up = null |
         .last_dev = null |
         .session_name = \"dev-${site}\"
@@ -172,7 +177,7 @@ sanity_check() {
 }
 
 # Core Functions ------------------------------------------------------------------------
-z() { # catch-all tester function
+z() { # catch-all testing function
     local site; site="$1"
     update_version_info "$site"
     update_timestamp "$site" "up"
@@ -219,13 +224,13 @@ new() {
 dev() {
     local site="$1"
     if ! sanity_check "$site"; then exit 1; fi
-    local cmd; cmd="${2:-run}" # "run" or "stop"
-    local bpath; bpath=$(yq e ".sites.${site}.bpath" "$REGISTRY")
-    local bport; bport=$(yq e ".sites.${site}.bport" "$REGISTRY")
-    local fpath; fpath=$(yq e ".sites.${site}.fpath" "$REGISTRY")
-    local fport; fport=$(yq e ".sites.${site}.fport" "$REGISTRY")
+    local bpath; bpath=$(yq e ".sites.${site}.paths.backend" "$REGISTRY")
+    local bport; bport=$(yq e ".sites.${site}.ports.backend" "$REGISTRY")
+    local fpath; fpath=$(yq e ".sites.${site}.paths.frontend" "$REGISTRY")
+    local fport; fport=$(yq e ".sites.${site}.ports.frontend" "$REGISTRY")
     local session; session=$(yq e ".sites.${site}.session_name" "$REGISTRY")
 
+    local cmd; cmd="${2:-run}" # "run" or "stop" internal-only args
     if [[ "$cmd" == "stop" ]]; then
         echo -e "Stopping '${G}$session${NC}'...";
 
@@ -244,6 +249,7 @@ dev() {
             echo -e "Found existing tmux session: '${G}$session${NC}'"
         else
             if ! tmux new-session -d -s "$session" \
+                -e "ENVIRONMENT=development" \
                 -e "ALLOWED_ORIGIN=http://localhost:$fport" 2>/dev/null; then
                 # -e "ALLOWED_ORIGIN=http://10.0.0.8:$fport" 2>/dev/null; then
                 ERR "Failed to start tmux session."
@@ -255,12 +261,14 @@ dev() {
 
         if ! tmux send-keys -t "${session}:0.0" "cd ${bpath} && go run ." Enter; then
             ERR "Failed to start '${G}${session}${NC}' backend process."
-            exit 1; fi
+            exit 1
+        fi
         OK "Backend service started"
 
         if ! tmux send-keys -t "${session}:0.1" "cd ${fpath} && npm run dev" Enter; then
             ERR "Failed to start '${G}${session}${NC}' frontend process."
-            exit 1; fi
+            exit 1
+        fi
         OK "Frontend service started"
 
         # update last_dev
@@ -270,13 +278,13 @@ dev() {
     fi
 }
 
-deploy() {
-    TODO "deploy"
+up() {
+    TODO "up"
     get_version_info "$PWD"
 }
 
-push() {
-    TODO "push"
+down() {
+    TODO "down"
 }
 
 stats() {
@@ -304,8 +312,8 @@ help() {
     echo -e "  ${G}list${NC}            List all sites"
     echo -e "  ${G}new <site>${NC}      Initialize a new site"
     echo -e "  ${G}dev <site>${NC}      Start a site in dev mode"
-    echo -e "  ${G}deploy <site>${NC}   Deploy a live site"
-    echo -e "  ${G}push <site>${NC}     Push a site to prod"
+    echo -e "  ${G}up <site>${NC}       Start a site in production (pulls from main)"
+    echo -e "  ${G}down <site>${NC}     Stop production site"
     echo -e "  ${G}stats <site>${NC}    Show stats for one (or all) sites"
     echo -e "  ${G}logs <site>${NC}     Show logs for one (or all) sites"
 }
@@ -313,9 +321,16 @@ help() {
 # main -----------------------------------------------------------------------------
 main() {
     case "${1}" in
-        new) new "$2";; list) list ;; -h|--help|help) help ;;
-        dev) dev "$2" ;; stop) dev "$2" "stop" ;; deploy) deploy "$2" ;; push) push "$2";;
-        stats) stats "$2" ;; logs) logs ;; z) z "$2";; *) help "short" ;;
+        -h|--help|help) help ;;
+        new) new "$2" ;;
+        list) list ;;
+        dev) dev "$2" ;;
+        stop) dev "$2" "stop" ;;
+        up) up "$2" ;;
+        down) down "$2" ;;
+        stats) stats "$2" ;;
+        logs) logs ;; z) z "$2" ;;
+        *) help "short" ;;
     esac
 }
 
